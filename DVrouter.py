@@ -54,6 +54,7 @@ class DVrouter(Router):
         self.__last_dv_sent_to_neighbor: Dict[_Addr, Dict[_Addr, Tuple[_Cost, int]]] = {}
 
     def handle_packet(self, port_received_on: _Port, packet: Packet):
+        # Kiểm tra xem địa chỉ đích có trong bảng định tuyến không nếu có thì chuyển đi
         if packet.is_traceroute:
             if packet.dst_addr in self.__forwarding_table:
                 entry = self.__forwarding_table[packet.dst_addr]
@@ -64,11 +65,13 @@ class DVrouter(Router):
                 received_dv: Dict[_Addr, Tuple[_Cost, int]] = _deserialize(packet.content)
             except Exception:
                 return
-
+            
+            # Kiểm tra xem địa chỉ nguồn của gói định tuyến có thuộc hàng xóm không 
             sender_neighbor_addr = packet.src_addr
             if sender_neighbor_addr not in self.__neighbors_by_addrs:
                 return
-
+            
+            # Xác định cost và port của mình để đến neighbor đó
             neighbor_details = self.__neighbors_by_addrs[sender_neighbor_addr]
             cost_to_sender = neighbor_details[COST_IDX]
             port_to_sender = neighbor_details[NEIGHBOR_PORT_IDX]
