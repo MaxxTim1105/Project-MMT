@@ -50,7 +50,6 @@ class DVrouter(Router):
 
         self.__neighbor_addrs_by_ports: Dict[_Port, _Addr] = {}
         self.__neighbors_by_addrs: Dict[_Addr, Tuple[_Cost, _Port]] = {}
-        self.__last_dv_sent_to_neighbor: Dict[_Addr, Dict[_Addr, Tuple[_Cost, int]]] = {}
 
     def handle_packet(self, port_received_on: _Port, packet: Packet):
         # Kiểm tra xem địa chỉ đích có trong bảng định tuyến không nếu có thì chuyển đi
@@ -150,8 +149,6 @@ class DVrouter(Router):
         removed_neighbor_addr = self.__neighbor_addrs_by_ports.pop(port)
         if removed_neighbor_addr in self.__neighbors_by_addrs:
             del self.__neighbors_by_addrs[removed_neighbor_addr]
-        if removed_neighbor_addr in self.__last_dv_sent_to_neighbor:
-            del self.__last_dv_sent_to_neighbor[removed_neighbor_addr]
         for dest, ft_entry in list(self.__forwarding_table.items()):
             if dest == self.addr:
                 continue
@@ -198,8 +195,6 @@ class DVrouter(Router):
             if not dv_to_send: # Không nên xảy ra
                 continue
 
-            if self.__last_dv_sent_to_neighbor.get(target_neighbor_addr) != dv_to_send:
-                content = _serialize(dv_to_send)
-                packet = Packet(Packet.ROUTING, self.addr, target_neighbor_addr, content)
-                self.send(port_to_target, packet)
-                self.__last_dv_sent_to_neighbor[target_neighbor_addr] = dv_to_send
+            content = _serialize(dv_to_send)
+            packet = Packet(Packet.ROUTING, self.addr, target_neighbor_addr, content)
+            self.send(port_to_target, packet)

@@ -101,7 +101,7 @@ rm -rf $WORKSPACE
 #####################################################
 
 printf "================================================================\n\n"
-printf "TESTS PASSED: $numCorrect/$((testNum - 1))\n"
+printf "TESTS ./test_dv_ls.sh DVPASSED: $numCorrect/$((testNum - 1))\n"
  
 
-sleep 100
+sleep 500
