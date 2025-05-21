@@ -6,16 +6,15 @@
 import base64
 import math
 import pickle
-# import sys # Không cần thiết nếu dùng số nguyên lớn cố định
 from typing import Any, Optional, Dict, Tuple
 from packet import Packet
 from router import Router
 
 type _Addr = Any
 type _Port = Any
-type _Cost = float
+type _Cost = int
 _INFINITY = math.inf # Định nghĩa giá trị vô cùng cho chi phí
-_INFINITY_HOPS = 1000000 # Số hop lớn, coi như vô cùng
+_INFINITY_HOPS = 100000 # Số hop lớn, coi như vô cùng
 
 # Chỉ số để truy cập tuple trong __forwarding_table
 COST_IDX = 0
@@ -52,12 +51,8 @@ class DVrouter(Router):
 
         self.__neighbor_addrs_by_ports: Dict[_Port, _Addr] = {}
         self.__neighbors_by_addrs: Dict[_Addr, Tuple[_Cost, _Port]] = {}
-        self.__last_dv_sent_to_neighbor: Dict[_Addr, Dict[_Addr, Tuple[_Cost, int]]] = {}
 
     def handle_packet(self, port_received_on: _Port, packet: Packet):
-        """Xử lý một gói tin đến (traceroute hoặc gói tin định tuyến)."""
-
-        # Xử lí gói tin traceroute
         if packet.is_traceroute:
             # Loại bỏ gói tin nếu không có đích trong bảng chuyển tiếp
             if packet.dst_addr in self.__forwarding_table:
@@ -73,13 +68,13 @@ class DVrouter(Router):
                 received_dv: Dict[_Addr, Tuple[_Cost, int]] = _deserialize(packet.content)
             except Exception:
                 return
-
-            # Return nếu DV router nhận được từ láng giềng không xác định/không phải láng giềng
+            
+            # Kiểm tra xem địa chỉ nguồn của gói định tuyến có thuộc hàng xóm không 
             sender_neighbor_addr = packet.src_addr
             if sender_neighbor_addr not in self.__neighbors_by_addrs:
                 return
-
-            # Lấy thông tin chi phí, cổng
+            
+            # Xác định cost và port của mình để đến neighbor đó
             neighbor_details = self.__neighbors_by_addrs[sender_neighbor_addr]
             cost_to_sender = neighbor_details[COST_IDX]
             port_to_sender = neighbor_details[NEIGHBOR_PORT_IDX]
@@ -97,7 +92,6 @@ class DVrouter(Router):
                 new_potential_entry = (candidate_cost, sender_neighbor_addr, port_to_sender, candidate_hops)
                 if candidate_cost == _INFINITY: # Chuẩn hóa entry không thể tới
                     new_potential_entry = (_INFINITY, None, None, _INFINITY_HOPS)
-
                 current_entry = self.__forwarding_table.get(dest)
                 
                 should_update = False
@@ -148,7 +142,7 @@ class DVrouter(Router):
             should_update = True
         else:
             # Ưu tiên nếu chi phí thấp hơn
-            if new_direct_entry[COST_IDX] < current_ft_entry[COST_IDX]:
+            if new_direct_entry[COST_IDX] != current_ft_entry[COST_IDX]:
                 should_update = True
 
             # Hoặc chi phí bằng nhau VÀ (đường hiện tại nhiều hop hơn HOẶC đường hiện tại không phải là trực tiếp tới endpoint này)
@@ -174,14 +168,10 @@ class DVrouter(Router):
         removed_neighbor_addr = self.__neighbor_addrs_by_ports.pop(port)
         if removed_neighbor_addr in self.__neighbors_by_addrs:
             del self.__neighbors_by_addrs[removed_neighbor_addr]
-        if removed_neighbor_addr in self.__last_dv_sent_to_neighbor:
-            del self.__last_dv_sent_to_neighbor[removed_neighbor_addr]
-
-        # Duyệt qua từng đích trong bảng chuyển tiếp để cập nhật (bỏ qua chính mình)
         for dest, ft_entry in list(self.__forwarding_table.items()):
             if dest == self.addr:
                 continue
-            if ft_entry[NEXT_HOP_IDX] == removed_neighbor_addr: # Điều kiện đơn giản hóa
+            if ft_entry[NEXT_HOP_IDX] == removed_neighbor_addr: # Điều kiện 
                 if ft_entry[COST_IDX] != _INFINITY or ft_entry[HOP_COUNT_IDX] != _INFINITY_HOPS:
                     self.__forwarding_table[dest] = (_INFINITY, None, None, _INFINITY_HOPS)
         
@@ -198,12 +188,9 @@ class DVrouter(Router):
         """Biểu diễn routing table ngắn gọn để debug."""
         ft_summary = {}
         for dest, (cost, nexthop, _port, hops) in self.__forwarding_table.items():
-            # Không hiển thị route đến chính nó trong summary này
-            if dest != self.addr:
+            if dest != self.addr: 
                 if cost < _INFINITY and hops < _INFINITY_HOPS:
                      ft_summary[dest] = (f"c:{cost:.1f}", f"nh:{nexthop}", f"hp:{hops}")
-                # else: # Tùy chọn: hiển thị cả các route không tới được nếu muốn
-                #     ft_summary[dest] = (f"c:inf", f"nh:-", f"hp:inf")
         return f"DVrouter(addr={self.addr}, FT={ft_summary if ft_summary else 'EMPTY'})"
 
 
@@ -230,16 +217,11 @@ class DVrouter(Router):
                 if next_hop_for_dest == target_neighbor_addr and dest != target_neighbor_addr:
                     cost_adv = _INFINITY
                     hops_adv = _INFINITY_HOPS
-                
                 dv_to_send[dest] = (cost_adv, hops_adv)
             
             # Không cần gửi nếu vector khoảng cách trống
             if not dv_to_send:
                 continue
-
-            # Tiến hành gửi nếu vector khoảng cách mới khác vector khoảng cách gần nhất đã gửi 
-            if self.__last_dv_sent_to_neighbor.get(target_neighbor_addr) != dv_to_send:
-                content = _serialize(dv_to_send)
-                packet = Packet(Packet.ROUTING, self.addr, target_neighbor_addr, content)
-                self.send(port_to_target, packet)
-                self.__last_dv_sent_to_neighbor[target_neighbor_addr] = dv_to_send
+            content = _serialize(dv_to_send)
+            packet = Packet(Packet.ROUTING, self.addr, target_neighbor_addr, content)
+            self.send(port_to_target, packet)
